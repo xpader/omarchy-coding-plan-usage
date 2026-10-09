@@ -69,8 +69,8 @@ umask 077 && mkdir -p ~/.local/state/omarchy/coding-plan-usage/keys
 echo -n 'YOUR_KEY' > ~/.local/state/omarchy/coding-plan-usage/keys/glm
 ```
 
-The key is passed to curl via a generated `.headers` file
-(`curl -H @file`), so it never appears in a process argv.
+The key lives only on disk and in memory: requests go through QML's
+built-in `XMLHttpRequest` (no curl subprocess, no key in any argv).
 
 ## GLM API
 

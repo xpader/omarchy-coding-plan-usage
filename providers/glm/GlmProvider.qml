@@ -42,6 +42,10 @@ Item {
   property double updatedAtMs: 0
   property bool refreshing: false
   readonly property bool hasApiKey: apiKey !== ""
+
+  // In-flight request (null when idle) and boot-grace flag.
+  property var activeXhr: null
+  property bool booted: false
   readonly property real headlinePercent: {
     var w = Util.bindingWindow(windows)
     return w ? Number(w.percent) : -1
@@ -67,14 +71,10 @@ Item {
   readonly property string home: Quickshell.env("HOME") || ""
   readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME") || home + "/.local/state") + "/omarchy/coding-plan-usage"
   readonly property string keyPath: stateDir + "/keys/" + providerId
-  readonly property string headerPath: keyPath + ".headers"
   readonly property string quotaUrl: "https://open.bigmodel.cn/api/monitor/usage/quota/limit"
 
   property string apiKey: ""
-  property bool headersReady: false
   property string apiKeyToWrite: ""
-  property string _stdoutText: ""
-  property string _stderrText: ""
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
@@ -90,12 +90,11 @@ Item {
   // How long to idle after startup before the first fetch (stability over
   // freshness; the panel fetches on open anyway).
   readonly property int startupFetchDelaySec: {
-    var n = parseInt(String(setting("startupFetchDelaySec", 15)), 10)
+    var n = parseInt(String(setting("startupFetchDelaySec", 2)), 10)
     if (!isFinite(n)) n = 15
     return Math.max(0, Math.min(300, n))
   }
 
-  property bool cycleStarted: false
 
   // ------------------------------------------------------------------ key
 
@@ -131,12 +130,13 @@ Item {
     statusText = ""
     updatedAtMs = 0
     if (value === "") {
-      headersReady = false
       state = "no-key"
       return
     }
     state = "loading"
-    syncHeaders()
+    // During the boot grace the startup timer fetches; afterwards a fresh
+    // key is fetched right away.
+    if (booted) refresh()
   }
 
   function setKey(key) {
@@ -164,22 +164,30 @@ Item {
       keyFile.reload()
       return
     }
-    if (!headersReady) {
-      syncHeaders()
-      return
-    }
-    if (fetchProcess.running) return
-    _stdoutText = ""
-    _stderrText = ""
+    if (activeXhr !== null) return
     refreshing = true
     if (state !== "ok") state = "loading"
-    fetchProcess.running = true
+    fetchTimeout.restart()
+
+    var xhr = new XMLHttpRequest()
+    activeXhr = xhr
+    xhr.onreadystatechange = function() {
+      if (xhr !== root.activeXhr || xhr.readyState !== XMLHttpRequest.DONE) return
+      root.activeXhr = null
+      fetchTimeout.stop()
+      root.handleResponse(xhr.status, xhr.responseText)
+    }
+    xhr.open("GET", quotaUrl)
+    // Raw Authorization value — GLM's monitor API takes the key as-is.
+    xhr.setRequestHeader("Authorization", apiKey)
+    xhr.setRequestHeader("Accept", "application/json")
+    xhr.send()
   }
 
-  function handleFetch(stdout, stderr, exitCode) {
+  function handleResponse(status, text) {
     refreshing = false
     var parsed = null
-    var raw = String(stdout || "").trim()
+    var raw = String(text || "").trim()
     if (raw !== "") {
       try {
         parsed = Model.parseQuota(JSON.parse(raw))
@@ -196,7 +204,7 @@ Item {
       return
     }
 
-    var message = parsed && parsed.error ? parsed.error : fetchErrorMessage(stderr, exitCode)
+    var message = parsed && parsed.error ? parsed.error : responseErrorMessage(status)
     if (windows.length > 0) {
       // Keep stale numbers on a wire failure; the panel shows the note.
       statusText = message + " — showing last known usage"
@@ -206,18 +214,12 @@ Item {
     statusText = message
   }
 
-  function fetchErrorMessage(stderr, exitCode) {
-    var text = String(stderr || "")
-    var http = text.match(/error:\s*(\d{3})/)
-    if (http) return "HTTP " + http[1]
-    if (exitCode === 6) return "Could not resolve host"
-    if (exitCode === 28) return "Request timed out"
-    if (exitCode === 7) return "Could not connect"
-    return "Request failed"
-  }
-
-  function syncHeaders() {
-    if (!syncProcess.running) syncProcess.running = true
+  function responseErrorMessage(status) {
+    if (status === 401) return "Invalid API key"
+    if (status === 402) return "Payment required"
+    if (status === 429) return "Rate limited"
+    if (status > 0) return "HTTP " + status
+    return "Network request failed"
   }
 
   Process {
@@ -235,69 +237,46 @@ Item {
   }
 
   Process {
-    id: syncProcess
-    running: false
-    // Rebuild the curl header twin from the key file. The key travels file
-    // to file inside one bash process, never through argv.
-    command: ["bash", "-c",
-      "umask 077; f=$0; [[ -s $f ]] || exit 1; mkdir -p \"$(dirname \"$f\")\"; printf 'Authorization: %s\\n' \"$(cat \"$f\")\" > \"$f.headers\"",
-      root.keyPath]
-    onExited: function(exitCode) {
-      root.headersReady = exitCode === 0
-      if (root.headersReady) root.refresh()
-      else if (root.state === "loading") {
-        root.state = "error"
-        root.statusText = "Could not prepare credentials"
-      }
-    }
-  }
-
-  Process {
     id: clearProcess
     running: false
-    command: ["bash", "-c", "rm -f \"$0\" \"$0.headers\"", root.keyPath]
+    command: ["bash", "-c", "rm -f \"$0\"", root.keyPath]
     onExited: root.applyKey("")
-  }
-
-  Process {
-    id: fetchProcess
-    running: false
-    command: ["curl", "-fsS", "--max-time", "15",
-      "-H", "@" + root.headerPath,
-      "-H", "Accept: application/json",
-      root.quotaUrl]
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root._stdoutText = text
-    }
-    stderr: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root._stderrText = text
-    }
-    onExited: function(exitCode) {
-      root.handleFetch(_stdoutText, _stderrText, exitCode)
-    }
   }
 
   // ------------------------------------------------------------- timers
 
-  // Same startup deal as the DeepSeek provider: fetch only after the key is
-  // loaded plus a grace period — no network during plugin startup itself.
+  // Boot grace: no network during plugin startup. Once it lapses, fetch at
+  // once (if a key is loaded) and let the poll timer take over.
   Timer {
-    id: startupDelay
     interval: root.startupFetchDelaySec * 1000
-    running: root.headersReady && !root.cycleStarted
+    running: true
     repeat: false
     onTriggered: {
-      root.cycleStarted = true
-      root.refresh()
+      root.booted = true
+      if (root.hasApiKey) root.refresh()
+    }
+  }
+
+  Timer {
+    id: fetchTimeout
+    interval: 15000
+    onTriggered: {
+      if (root.activeXhr === null) return
+      root.activeXhr = null // the readystatechange guard bails on mismatch
+      root.refreshing = false
+      if (root.windows.length > 0)
+        root.statusText = "Request timed out — showing last known usage"
+      else {
+        root.state = "error"
+        root.statusText = "Request timed out"
+      }
     }
   }
 
   Timer {
     id: refreshTimer
     interval: root.refreshIntervalSec * 1000
-    running: root.cycleStarted
+    running: root.booted && root.hasApiKey
     repeat: true
     onTriggered: root.refresh()
   }
