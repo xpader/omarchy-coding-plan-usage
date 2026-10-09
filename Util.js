@@ -137,6 +137,33 @@ function windowById(windows, id) {
   return null
 }
 
+// GET over QML XMLHttpRequest. QML's XHR ignores the standard `timeout`
+// property (verified), so the caller owns a QML Timer watchdog and treats
+// a null/replace activeXhr as "dropped" — the returned xhr enables the
+// identity latch: `if (activeXhr !== xhr) return` in the callback.
+function httpGet(url, authHeader, onDone) {
+  var xhr = new XMLHttpRequest()
+  xhr.onreadystatechange = function() {
+    if (xhr.readyState !== XMLHttpRequest.DONE) return
+    onDone(xhr.status, xhr.responseText)
+  }
+  xhr.open("GET", url)
+  if (authHeader !== "") xhr.setRequestHeader("Authorization", authHeader)
+  xhr.setRequestHeader("Accept", "application/json")
+  xhr.send()
+  return xhr
+}
+
+// HTTP status code -> short user-facing message; status 0 means the
+// request never completed (network error).
+function httpStatusMessage(status) {
+  if (status === 401) return "Invalid API key"
+  if (status === 402) return "Payment required"
+  if (status === 429) return "Rate limited"
+  if (status > 0) return "HTTP " + status
+  return "Network request failed"
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     clamp: clamp,
@@ -153,6 +180,7 @@ if (typeof module !== "undefined") {
     formatUsedLimit: formatUsedLimit,
     formatClock: formatClock,
     bindingWindow: bindingWindow,
-    windowById: windowById
+    windowById: windowById,
+    httpStatusMessage: httpStatusMessage
   }
 }

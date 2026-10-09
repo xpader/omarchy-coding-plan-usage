@@ -2,7 +2,6 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Commons
-import "../.."
 import "../../Util.js" as Util
 import "Model.js" as Model
 
@@ -20,7 +19,7 @@ import "Model.js" as Model
 //   refresh() / setKey(key) / clearKey() / hasApiKey
 //
 // The API key lives at <stateHome>/omarchy/coding-plan-usage/keys/<id>
-// (mode 600). Requests go out via the shared HttpFetcher (XMLHttpRequest),
+// (mode 600). Requests go out via Util.httpGet (XMLHttpRequest),
 // so the secret never appears in a process argv.
 
 Item {
@@ -45,6 +44,7 @@ Item {
 
   // In-flight request (null when idle) and boot-grace flag.
   property bool booted: false
+  property var activeXhr: null
   readonly property real headlinePercent: {
     var w = Util.bindingWindow(windows)
     return w ? Number(w.percent) : -1
@@ -163,10 +163,17 @@ Item {
       keyFile.reload()
       return
     }
-    if (fetcher.busy) return
+    if (activeXhr !== null) return
     refreshing = true
     if (state !== "ok") state = "loading"
-    fetcher.get()
+    fetchTimeout.restart()
+    var xhr = Util.httpGet(quotaUrl, apiKey, function(status, text) {
+      if (activeXhr !== xhr) return // watchdog fired or superseded
+      activeXhr = null
+      fetchTimeout.stop()
+      handleResponse(status, text)
+    })
+    activeXhr = xhr
   }
 
   function handleResponse(status, text) {
@@ -189,7 +196,7 @@ Item {
       return
     }
 
-    var message = parsed && parsed.error ? parsed.error : fetcher.statusMessage(status)
+    var message = parsed && parsed.error ? parsed.error : Util.httpStatusMessage(status)
     if (windows.length > 0) {
       // Keep stale numbers on a wire failure; the panel shows the note.
       statusText = message + " — showing last known usage"
@@ -199,22 +206,6 @@ Item {
     statusText = message
   }
 
-
-  HttpFetcher {
-    id: fetcher
-    url: root.quotaUrl
-    authHeader: root.apiKey
-    onResponded: (status, text) => root.handleResponse(status, text)
-    onTimedOut: {
-      root.refreshing = false
-      if (root.windows.length > 0)
-        root.statusText = "Request timed out — showing last known usage"
-      else {
-        root.state = "error"
-        root.statusText = "Request timed out"
-      }
-    }
-  }
 
   Process {
     id: mkdirProcess
@@ -248,6 +239,24 @@ Item {
     onTriggered: {
       root.booted = true
       if (root.hasApiKey) root.refresh()
+    }
+  }
+
+  // QML's XHR has no usable timeout — this watchdog is the timeout. A
+  // late response self-destructs via the identity latch in refresh().
+  Timer {
+    id: fetchTimeout
+    interval: 15000
+    onTriggered: {
+      if (activeXhr === null) return
+      activeXhr = null
+      refreshing = false
+      if (windows.length > 0)
+        statusText = "Request timed out — showing last known usage"
+      else {
+        state = "error"
+        statusText = "Request timed out"
+      }
     }
   }
 

@@ -2,7 +2,6 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Commons
-import "../.."
 import "../../Util.js" as Util
 import "Model.js" as Model
 
@@ -74,6 +73,7 @@ Item {
 
   // In-flight request (null when idle) and boot-grace flag.
   property bool booted: false
+  property var activeXhr: null
   // Fetching before the ledger loads would rebase the baseline and zero
   // today's spend, so the refresh timer stays off until it is readable.
   property bool ledgerReady: false
@@ -196,10 +196,17 @@ Item {
       keyFile.reload()
       return
     }
-    if (fetcher.busy) return
+    if (activeXhr !== null) return
     refreshing = true
     if (state !== "ok") state = "loading"
-    fetcher.get()
+    fetchTimeout.restart()
+    var xhr = Util.httpGet(balanceUrl, "Bearer " + apiKey, function(status, text) {
+      if (activeXhr !== xhr) return // watchdog fired or superseded
+      activeXhr = null
+      fetchTimeout.stop()
+      handleResponse(status, text)
+    })
+    activeXhr = xhr
   }
 
   function handleResponse(status, text) {
@@ -225,7 +232,7 @@ Item {
       return
     }
 
-    var message = parsed && parsed.error ? parsed.error : fetcher.statusMessage(status)
+    var message = parsed && parsed.error ? parsed.error : Util.httpStatusMessage(status)
     if (windows.length > 0) {
       statusText = message + " — showing last known balance"
       return
@@ -265,22 +272,6 @@ Item {
     }]
   }
 
-  HttpFetcher {
-    id: fetcher
-    url: root.balanceUrl
-    authHeader: "Bearer " + root.apiKey
-    onResponded: (status, text) => root.handleResponse(status, text)
-    onTimedOut: {
-      root.refreshing = false
-      if (root.windows.length > 0)
-        root.statusText = "Request timed out — showing last known balance"
-      else {
-        root.state = "error"
-        root.statusText = "Request timed out"
-      }
-    }
-  }
-
   Process {
     id: mkdirProcess
     running: false
@@ -317,6 +308,24 @@ Item {
     onTriggered: {
       root.booted = true
       if (root.hasApiKey && root.ledgerReady) root.refresh()
+    }
+  }
+
+  // QML's XHR has no usable timeout — this watchdog is the timeout. A
+  // late response self-destructs via the identity latch in refresh().
+  Timer {
+    id: fetchTimeout
+    interval: 15000
+    onTriggered: {
+      if (activeXhr === null) return
+      activeXhr = null
+      refreshing = false
+      if (windows.length > 0)
+        statusText = "Request timed out — showing last known balance"
+      else {
+        state = "error"
+        statusText = "Request timed out"
+      }
     }
   }
 
