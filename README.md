@@ -2,6 +2,8 @@
 
 Omarchy bar widget showing coding-plan quota usage across LLM platforms.
 
+![Panel](docs/panel.png)
+
 - Bar: one icon + the binding (fullest) window percent, e.g. `󰹊 42%`
   (balance platforms show the amount, e.g. ` ¥110.00`)
 - Popup (click): every enabled platform stacked top-to-bottom, each with
