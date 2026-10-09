@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import "../.."
 import "../../Util.js" as Util
 import "Model.js" as Model
 
@@ -72,7 +73,6 @@ Item {
   property int spentToday: 0
 
   // In-flight request (null when idle) and boot-grace flag.
-  property var activeXhr: null
   property bool booted: false
   // Fetching before the ledger loads would rebase the baseline and zero
   // today's spend, so the refresh timer stays off until it is readable.
@@ -196,23 +196,10 @@ Item {
       keyFile.reload()
       return
     }
-    if (activeXhr !== null) return
+    if (fetcher.busy) return
     refreshing = true
     if (state !== "ok") state = "loading"
-    fetchTimeout.restart()
-
-    var xhr = new XMLHttpRequest()
-    activeXhr = xhr
-    xhr.onreadystatechange = function() {
-      if (xhr !== root.activeXhr || xhr.readyState !== XMLHttpRequest.DONE) return
-      root.activeXhr = null
-      fetchTimeout.stop()
-      root.handleResponse(xhr.status, xhr.responseText)
-    }
-    xhr.open("GET", balanceUrl)
-    xhr.setRequestHeader("Authorization", "Bearer " + apiKey)
-    xhr.setRequestHeader("Accept", "application/json")
-    xhr.send()
+    fetcher.get()
   }
 
   function handleResponse(status, text) {
@@ -238,7 +225,7 @@ Item {
       return
     }
 
-    var message = parsed && parsed.error ? parsed.error : responseErrorMessage(status)
+    var message = parsed && parsed.error ? parsed.error : fetcher.statusMessage(status)
     if (windows.length > 0) {
       statusText = message + " — showing last known balance"
       return
@@ -247,13 +234,6 @@ Item {
     statusText = message
   }
 
-  function responseErrorMessage(status) {
-    if (status === 401) return "Invalid API key"
-    if (status === 402) return "Payment required"
-    if (status === 429) return "Rate limited"
-    if (status > 0) return "HTTP " + status
-    return "Network request failed"
-  }
 
   function buildWindows(total, granted, topped) {
     var breakdown = []
@@ -283,6 +263,22 @@ Item {
       available: true,
       details: []
     }]
+  }
+
+  HttpFetcher {
+    id: fetcher
+    url: root.balanceUrl
+    authHeader: "Bearer " + root.apiKey
+    onResponded: (status, text) => root.handleResponse(status, text)
+    onTimedOut: {
+      root.refreshing = false
+      if (root.windows.length > 0)
+        root.statusText = "Request timed out — showing last known balance"
+      else {
+        root.state = "error"
+        root.statusText = "Request timed out"
+      }
+    }
   }
 
   Process {
@@ -321,22 +317,6 @@ Item {
     onTriggered: {
       root.booted = true
       if (root.hasApiKey && root.ledgerReady) root.refresh()
-    }
-  }
-
-  Timer {
-    id: fetchTimeout
-    interval: 15000
-    onTriggered: {
-      if (root.activeXhr === null) return
-      root.activeXhr = null // the readystatechange guard bails on mismatch
-      root.refreshing = false
-      if (root.windows.length > 0)
-        root.statusText = "Request timed out — showing last known balance"
-      else {
-        root.state = "error"
-        root.statusText = "Request timed out"
-      }
     }
   }
 

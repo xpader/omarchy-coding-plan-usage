@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import "../.."
 import "../../Util.js" as Util
 import "Model.js" as Model
 
@@ -19,9 +20,8 @@ import "Model.js" as Model
 //   refresh() / setKey(key) / clearKey() / hasApiKey
 //
 // The API key lives at <stateHome>/omarchy/coding-plan-usage/keys/<id>
-// (mode 600). A twin `.headers` file carrying "Authorization: <key>" is
-// rebuilt from it via bash so the secret never shows up in a process argv
-// (`curl -H @file`).
+// (mode 600). Requests go out via the shared HttpFetcher (XMLHttpRequest),
+// so the secret never appears in a process argv.
 
 Item {
   id: root
@@ -44,7 +44,6 @@ Item {
   readonly property bool hasApiKey: apiKey !== ""
 
   // In-flight request (null when idle) and boot-grace flag.
-  property var activeXhr: null
   property bool booted: false
   readonly property real headlinePercent: {
     var w = Util.bindingWindow(windows)
@@ -164,24 +163,10 @@ Item {
       keyFile.reload()
       return
     }
-    if (activeXhr !== null) return
+    if (fetcher.busy) return
     refreshing = true
     if (state !== "ok") state = "loading"
-    fetchTimeout.restart()
-
-    var xhr = new XMLHttpRequest()
-    activeXhr = xhr
-    xhr.onreadystatechange = function() {
-      if (xhr !== root.activeXhr || xhr.readyState !== XMLHttpRequest.DONE) return
-      root.activeXhr = null
-      fetchTimeout.stop()
-      root.handleResponse(xhr.status, xhr.responseText)
-    }
-    xhr.open("GET", quotaUrl)
-    // Raw Authorization value — GLM's monitor API takes the key as-is.
-    xhr.setRequestHeader("Authorization", apiKey)
-    xhr.setRequestHeader("Accept", "application/json")
-    xhr.send()
+    fetcher.get()
   }
 
   function handleResponse(status, text) {
@@ -204,7 +189,7 @@ Item {
       return
     }
 
-    var message = parsed && parsed.error ? parsed.error : responseErrorMessage(status)
+    var message = parsed && parsed.error ? parsed.error : fetcher.statusMessage(status)
     if (windows.length > 0) {
       // Keep stale numbers on a wire failure; the panel shows the note.
       statusText = message + " — showing last known usage"
@@ -214,12 +199,21 @@ Item {
     statusText = message
   }
 
-  function responseErrorMessage(status) {
-    if (status === 401) return "Invalid API key"
-    if (status === 402) return "Payment required"
-    if (status === 429) return "Rate limited"
-    if (status > 0) return "HTTP " + status
-    return "Network request failed"
+
+  HttpFetcher {
+    id: fetcher
+    url: root.quotaUrl
+    authHeader: root.apiKey
+    onResponded: (status, text) => root.handleResponse(status, text)
+    onTimedOut: {
+      root.refreshing = false
+      if (root.windows.length > 0)
+        root.statusText = "Request timed out — showing last known usage"
+      else {
+        root.state = "error"
+        root.statusText = "Request timed out"
+      }
+    }
   }
 
   Process {
@@ -254,22 +248,6 @@ Item {
     onTriggered: {
       root.booted = true
       if (root.hasApiKey) root.refresh()
-    }
-  }
-
-  Timer {
-    id: fetchTimeout
-    interval: 15000
-    onTriggered: {
-      if (root.activeXhr === null) return
-      root.activeXhr = null // the readystatechange guard bails on mismatch
-      root.refreshing = false
-      if (root.windows.length > 0)
-        root.statusText = "Request timed out — showing last known usage"
-      else {
-        root.state = "error"
-        root.statusText = "Request timed out"
-      }
     }
   }
 
