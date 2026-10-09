@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "pader.coding-plan-usage",
+  "name": "Coding Plan Usage",
+  "version": "0.1.0",
+  "author": "pader",
+  "license": "MIT",
+  "description": "Coding-plan quota usage for LLM platforms (GLM first): an icon with the used percent in the bar, and a popup with per-window meters, token usage, and reset times.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Coding Plan Usage",
+    "description": "Icon + percent pill; popup shows per-window usage, progress bars, and reset times per platform.",
+    "category": "AI",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "providers": {
+        "glm": { "enabled": true }
+      }
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 60,
+        "max": 86400,
+        "step": 30,
+        "defaultValue": 600
+      }
+    ]
+  }
+}
