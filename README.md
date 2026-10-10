@@ -103,3 +103,7 @@ the first provider missing a key, `Esc` close.
 
 - Edit + `omarchy restart shell`: plugin hot-reload exists but may serve
   a cached document for inner files; a restart always applies cleanly.
+
+## License
+
+[MIT](LICENSE) © Pader
