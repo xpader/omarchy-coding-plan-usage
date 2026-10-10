@@ -1,5 +1,7 @@
 # coding-plan-usage
 
+English | [简体中文](README.zh-CN.md)
+
 Omarchy bar widget showing coding-plan quota usage across LLM platforms.
 
 ![Panel](preview.png)
