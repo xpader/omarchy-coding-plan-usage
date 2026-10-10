@@ -2,7 +2,7 @@
 
 Omarchy bar widget showing coding-plan quota usage across LLM platforms.
 
-![Panel](docs/panel.png)
+![Panel](preview.png)
 
 - Bar: one icon + the binding (fullest) window percent, e.g. `󰹊 42%`
   (balance platforms show the amount, e.g. ` ¥110.00`)
@@ -10,6 +10,15 @@ Omarchy bar widget showing coding-plan quota usage across LLM platforms.
   per-window usage, progress bars, reset time + countdown, used/limit
   tokens, per-model breakdown, API key management
 - Alarm coloring: < 70% normal, >= 70% accent, >= 90% urgent
+
+## Install
+
+```sh
+omarchy plugin add https://github.com/xpader/omarchy-coding-plan-usage.git --enable
+```
+
+Then add the widget to your bar layout and set providers/refresh interval
+in `~/.config/omarchy/shell.json` (see below).
 
 ## Structure
 
@@ -103,6 +112,16 @@ the first provider missing a key, `Esc` close.
 
 - Edit + `omarchy restart shell`: plugin hot-reload exists but may serve
   a cached document for inner files; a restart always applies cleanly.
+
+## Remove
+
+```sh
+omarchy plugin remove pader.coding-plan-usage
+```
+
+Removal keeps your saved API keys on disk at
+`~/.local/state/omarchy/coding-plan-usage/keys/`; delete that directory
+if you no longer need them.
 
 ## License
 
