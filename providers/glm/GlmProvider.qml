@@ -15,6 +15,10 @@ import "Model.js" as Model
 //   windows    [{ id, title, percent(0-100|-1), resetAtMs, used, limit,
 //                 details: [{ name, value }] }]
 //   headlinePercent  the binding (fullest) window percent, -1 unknown
+//   barSegments     [{ icon, brandIcon, text, tooltip, urgent }] for the
+//                   bar pill (empty → barFallbackText), updated on refresh
+//   brandIcon       url of the SVG shown in the bar pill + panel hero
+//   barFallbackText string shown in the pill when no segment has data
 //   updatedAtMs / refreshing
 //   refresh() / setKey(key) / clearKey() / hasApiKey
 //

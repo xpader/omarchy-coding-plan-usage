@@ -229,12 +229,18 @@ Panel {
     anchors.fill: parent
     segments: root.barSegments
     fallbackText: root.barFallbackText
-    foreground: root.foreground
+    // Bar text rides barForeground (base Ui/Panel property): in transparent
+    // bar mode that is the wallpaper-contrast color every stock widget uses.
+    // bar.foreground is the raw theme/shell.toml value and ignores that
+    // recomputation, so the pill would diverge from the rest of the bar.
+    foreground: root.barForeground
     urgentColor: root.urgent
-    dim: root.dim
+    dim: Qt.darker(root.barForeground, 1.55)
     active: root.anySegmentUrgent
     dimmed: root.barStatus === "no-key"
-    fontSize: Style.font.caption
+    // Match neighboring BarIconButton widgets (power/battery, audio, network):
+    // icon+value text renders at Style.bar.iconFont, not caption.
+    fontSize: Style.bar.iconFont
     fontFamily: root.fontFamily
     tooltipText: {
       if (root.barSegments.length > 0) {
